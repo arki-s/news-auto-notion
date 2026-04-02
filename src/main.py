@@ -163,11 +163,11 @@ def send_notification(notion_url: str) -> None:
     requests.post(
         f"https://ntfy.sh/{NTFY}",
         headers={
-            "Title": "今日のニュースが届いたにゃ！",
+            "Title": "Daily News is ready!",
             "Click": notion_url,
             "Tags":  "newspaper",
         },
-        data="Notionに保存したにゃ！タップして読むにゃ".encode("utf-8"),
+        data="Today's news digest is ready. Tap to read!".encode("utf-8"),
         timeout=10
     )
 
