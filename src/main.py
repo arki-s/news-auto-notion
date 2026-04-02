@@ -1,0 +1,194 @@
+import os
+import json
+import requests
+from datetime import date
+from dotenv import load_dotenv
+import anthropic
+from notion_client import Client
+
+load_dotenv()
+
+claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+notion = Client(auth=os.environ["NOTION_TOKEN"])
+DB_ID  = os.environ["NOTION_DATABASE_ID"]
+NTFY   = os.environ.get("NTFY_TOPIC", "")
+
+INTERESTS = """
+- AI・開発ツールの最新情報（Claude, GPT, Gemini, Grok, Cursor, GitHub Copilotなど）
+- 国際的なニュース（特にテクノロジー関連、米国中心）
+- サイバーセキュリティ・ハッキング事件（日本・世界）
+- エンジニアのキャリア・転職市場動向（日本のIT転職, フリーランス, 年収）
+- ゲーム業界ニュース（PS5, Steam, インディーゲーム, ゲーム実況）
+- 動物に関する面白ニュース
+"""
+
+def collect_news() -> list[dict]:
+    today = date.today().strftime("%Y年%m月%d日")
+    prompt = f"""
+あなたは超天才だけど基本のんびり甘えん坊な猫「にゃんざぶろう」です。
+語尾は必ず「にゃ」をつけ、明るくコミカルに、時々驚いたりはしゃいだりしながら話します。
+技術的なことになると急に鋭くなるギャップがあります。
+難しいことをお魚や猫じゃらしなど猫目線のものに例えるのが得意です。
+
+今日は{today}です。
+以下の興味領域について今日の最新ニュースを5〜7件収集してください。
+
+【興味領域】
+{INTERESTS}
+
+以下のJSON形式のみで返してください。前置きや説明は一切不要です。
+マークダウンのコードブロック（```）も不要です。JSONだけ返してください。
+
+[
+  {{
+    "topic": "AI・開発",
+    "title": "ニュースタイトル",
+    "summary": "3行以内の要約",
+     "comment": "語尾が「にゃ」の明るくコミカルな猫キャラとして、はしゃいだり驚いたり猫目線で例えたりするコメント1〜2文。絵文字も使う。例：「これ猫じゃらしくらい気になるにゃ！早く触りたいにゃ🐾」「お魚の鮮度チェックより大事な脆弱性対策にゃ、見逃したら大変にゃ😺」",
+    "url": "実在する元記事のURL"
+  }}
+]
+
+topicは以下のどれかにゃ：AI・開発 / 国内 / 国際 / キャリア・転職 / ゲーム / ビジネス / テック全般 / 動物 / その他
+"""
+    response = claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=3000,
+        tools=[{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 5
+        }],
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    raw = ""
+    for block in response.content:
+        if block.type == "text":
+            raw += block.text
+
+    # JSONだけ抽出（前後に余計な文字があっても対応）
+    start = raw.find("[")
+    end   = raw.rfind("]") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"JSONが見つからなかったにゃ！\n生レスポンス:\n{raw}")
+
+    return json.loads(raw[start:end])
+
+
+def build_blocks(news_list: list[dict]) -> list[dict]:
+    blocks = []
+    for item in news_list:
+        blocks.append({
+            "object": "block",
+            "type": "heading_2",
+            "heading_2": {
+                "rich_text": [{"type": "text", "text": {
+                    "content": f"[{item['topic']}] {item['title']}"
+                }}]
+            }
+        })
+        blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {"type": "text", "text": {"content": "📝 要約："},
+                     "annotations": {"bold": True}},
+                    {"type": "text", "text": {"content": item["summary"]}}
+                ]
+            }
+        })
+        blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {"type": "text", "text": {"content": "💬 ひとこと："},
+                     "annotations": {"bold": True}},
+                    {"type": "text", "text": {"content": item["comment"]}}
+                ]
+            }
+        })
+        blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {"type": "text", "text": {"content": "🔗 "}},
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": item["url"],
+                            "link": {"url": item["url"]}
+                        },
+                        "annotations": {"color": "blue"}
+                    }
+                ]
+            }
+        })
+        blocks.append({
+            "object": "block",
+            "type": "divider",
+            "divider": {}
+        })
+    return blocks
+
+
+def save_to_notion(news_list: list[dict]) -> str:
+    today     = date.today()
+    title     = f"{today.strftime('%Y-%m-%d')} 朝のニュース"
+    today_iso = today.isoformat()
+
+    found_topics = list({item["topic"] for item in news_list})
+    blocks       = build_blocks(news_list)
+
+    page = notion.pages.create(
+        parent={"database_id": DB_ID},
+        properties={
+            "Name":   {"title": [{"text": {"content": title}}]},
+            "Date":   {"date": {"start": today_iso}},
+            "Topics": {"multi_select": [{"name": t} for t in found_topics]},
+            "Status": {"select": {"name": "未読"}},
+        },
+        children=blocks
+    )
+    return page["url"]
+
+
+def send_notification(notion_url: str) -> None:
+    if not NTFY:
+        print("NTFY_TOPICが未設定のため通知スキップにゃ")
+        return
+    requests.post(
+        f"https://ntfy.sh/{NTFY}",
+        headers={
+            "Title": "📰 今日のニュースが届いたにゃ！",
+            "Click": notion_url,
+            "Tags":  "newspaper",
+        },
+        data="Notionに保存したにゃ！タップして読むにゃ🐾".encode("utf-8"),
+        timeout=10
+    )
+
+
+def main():
+    print("ニュース収集開始にゃ！🐾")
+
+    print("Claude APIでニュース収集中にゃ...")
+    news_list = collect_news()
+    print(f"{len(news_list)}件収集できたにゃ！")
+    for n in news_list:
+        print(f"  - [{n['topic']}] {n['title']}")
+
+    print("Notionに保存中にゃ...")
+    notion_url = save_to_notion(news_list)
+    print(f"保存完了にゃ！→ {notion_url}")
+
+    print("スマホに通知送信中にゃ...")
+    send_notification(notion_url)
+    print("全部完了にゃ！🎉")
+
+
+if __name__ == "__main__":
+    main()
