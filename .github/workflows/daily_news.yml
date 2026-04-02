@@ -1,0 +1,34 @@
+name: 📰 Daily News Collector
+
+on:
+  # 毎朝8時（日本時間）に自動実行
+  schedule:
+    - cron: "0 23 * * *" # UTC 23:00 = JST 08:00
+
+  # 手動実行もできる（テスト用）
+  workflow_dispatch:
+
+jobs:
+  collect-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📦 コードをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 🐍 Python環境をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: 📚 ライブラリをインストール
+        run: pip install -r requirements.txt
+
+      - name: 🐾 ニュース収集スクリプトを実行
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python src/main.py
