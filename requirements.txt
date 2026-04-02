@@ -1,0 +1,4 @@
+anthropic
+notion-client
+requests
+python-dotenv
