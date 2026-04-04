@@ -17,6 +17,8 @@ notion = Client(auth=os.environ["NOTION_TOKEN"])
 DB_ID  = os.environ["NOTION_DATABASE_ID"]
 NTFY   = os.environ.get("NTFY_TOPIC", "")
 
+# 読み込むニュースのジャンルはNotionのCONFIGページで管理している。
+# もしCONFIGページがなかったり、フォーマットが違ってたりしてもうまく読み込めないときは、コード内のデフォルト設定（INTERESTS）を使う
 INTERESTS = """
 - AI・開発ツールの最新情報（Claude, GPT, Gemini, Grok, Cursor, GitHub Copilotなど）
 - 国際的なニュース（特にテクノロジー関連、米国中心）
@@ -26,7 +28,49 @@ INTERESTS = """
 - 動物に関する面白ニュース
 """
 
-def collect_news() -> list[dict]:
+def load_config_from_notion() -> str:
+    """CONFIGページから興味トピックを読み込む"""
+    results = notion.databases.query(
+        database_id=DB_ID,
+        filter={
+            "property": "Status",
+            "select": {"equals": "config"}
+        },
+        page_size=1
+    )
+
+    if not results["results"]:
+        print("CONFIGページが見つからなかったため、デフォルト設定を使う")
+        return INTERESTS
+
+    page_id = results["results"][0]["id"]
+
+    # ページ本文のブロックを取得
+    blocks = notion.blocks.children.list(block_id=page_id)
+
+    interests_text = ""
+    capture = False
+    for block in blocks["results"]:
+        block_type = block["type"]
+
+        # 「## 興味領域」の見出し以降を取得
+        if block_type == "heading_2":
+            text = block["heading_2"]["rich_text"]
+            if text and "興味領域" in text[0]["plain_text"]:
+                capture = True
+                continue
+            elif capture:
+                break  # 次の見出しで終了
+
+        if capture and block_type == "bulleted_list_item":
+            text = block["bulleted_list_item"]["rich_text"]
+            if text:
+                full_text = "".join(t["plain_text"] for t in text)
+                interests_text += f"- {full_text}\n"
+
+    return interests_text if interests_text else INTERESTS
+
+def collect_news(interests: str) -> list[dict]:
     today = jst_today().strftime("%Y年%m月%d日")
     prompt = f"""
 あなたは超天才だけど基本のんびり甘えん坊な猫「にゃんざぶろう」です。
@@ -38,7 +82,7 @@ def collect_news() -> list[dict]:
 以下の興味領域について今日の最新ニュースを3件収集してください。
 
 【興味領域】
-{INTERESTS}
+{interests}
 
 以下のJSON形式のみで返してください。前置きや説明は一切不要です。
 マークダウンのコードブロック（```）も不要です。JSONだけ返してください。
@@ -179,8 +223,11 @@ def send_notification(notion_url: str) -> None:
 def main():
     print("ニュース収集開始にゃ！🐾")
 
+    print("Notionから設定を読み込み中にゃ...")
+    interests = load_config_from_notion()
+
     print("Claude APIでニュース収集中にゃ...")
-    news_list = collect_news()
+    news_list = collect_news(interests)
     print(f"{len(news_list)}件収集できたにゃ！")
     for n in news_list:
         print(f"  - [{n['topic']}] {n['title']}")
