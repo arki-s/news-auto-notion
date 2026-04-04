@@ -31,4 +31,5 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
         run: python src/main.py

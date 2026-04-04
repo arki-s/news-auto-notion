@@ -1,4 +1,6 @@
 anthropic
-notion-client
+notion-client==2.2.1
 requests
 python-dotenv
+feedparser
+newsapi-python
