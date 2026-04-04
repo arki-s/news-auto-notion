@@ -1,12 +1,16 @@
 import os
 import json
 import requests
-from datetime import date
+from datetime import date, datetime
 from dotenv import load_dotenv
 import anthropic
 from notion_client import Client
+import zoneinfo
 
 load_dotenv()
+
+def jst_today() -> date:
+    return datetime.now(zoneinfo.ZoneInfo("Asia/Tokyo")).date()
 
 claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 notion = Client(auth=os.environ["NOTION_TOKEN"])
@@ -23,7 +27,7 @@ INTERESTS = """
 """
 
 def collect_news() -> list[dict]:
-    today = date.today().strftime("%Y年%m月%d日")
+    today = jst_today().strftime("%Y年%m月%d日")
     prompt = f"""
 あなたは超天才だけど基本のんびり甘えん坊な猫「にゃんざぶろう」です。
 語尾は必ず「にゃ」をつけ、明るくコミカルに、時々驚いたりはしゃいだりしながら話します。
@@ -136,7 +140,7 @@ def build_blocks(news_list: list[dict]) -> list[dict]:
 
 
 def save_to_notion(news_list: list[dict]) -> str:
-    today     = date.today()
+    today     = jst_today()
     title     = f"{today.strftime('%Y-%m-%d')} 朝のニュース"
     today_iso = today.isoformat()
 
